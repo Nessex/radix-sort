@@ -72,7 +72,7 @@ pub fn aggregate_tile_counts(cm: &CountManager, tile_counts: &[Counts]) -> Rc<Re
 
     for tile in tile_counts.iter() {
         for i in 0..256usize {
-            counts.add(i, tile[i]);
+            counts[i] += tile[i];
         }
     }
 

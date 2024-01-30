@@ -192,7 +192,7 @@ impl Counter {
             return;
         } else if bucket.len() == 1 {
             let b = bucket[0].get_level(level) as usize;
-            counts.inc(b);
+            counts[b] += 1;
 
             meta.first = b as u8;
             meta.last = b as u8;
@@ -210,7 +210,7 @@ impl Counter {
         // First, count directly into the output buffer until we find a value that is out of order.
         for (i, item) in bucket.iter().enumerate() {
             let b = item.get_level(level) as usize;
-            counts.inc(b);
+            counts[b] += 1;
 
             if b < prev {
                 continue_from = i + 1;
@@ -245,28 +245,17 @@ impl Counter {
 
         rem.iter().for_each(|v| {
             let b = v.get_level(level) as usize;
-            counts.inc(b);
+            counts[b] += 1;
         });
 
         for i in 0..256 {
             let agg = self.0[i * 4] + self.0[1 + i * 4] + self.0[2 + i * 4] + self.0[3 + i * 4];
-            counts.add(i, agg);
+            counts[i] += agg;
         }
 
         meta.first = first;
         meta.last = last;
         meta.already_sorted = already_sorted;
-    }
-}
-
-pub struct CountIter<'a>(&'a Counts, usize);
-
-pub struct CountIterEnumerable<'a>(&'a mut CountIter<'a>);
-
-impl<'a> CountIter<'a> {
-    #[inline(always)]
-    pub fn enumerate(&'a mut self) -> CountIterEnumerable<'a> {
-        CountIterEnumerable(self)
     }
 }
 
@@ -277,28 +266,6 @@ impl Counts {
     }
 
     #[inline(always)]
-    pub fn get_count(self, radix: usize) -> usize {
-        debug_assert!(radix < 256);
-        unsafe { *self.0.get_unchecked(radix) }
-    }
-
-    #[inline(always)]
-    pub fn inc(&mut self, radix: usize) {
-        debug_assert!(radix < 256);
-        unsafe {
-            *self.0.get_unchecked_mut(radix) += 1;
-        }
-    }
-
-    #[inline(always)]
-    pub fn add(&mut self, radix: usize, count: usize) {
-        debug_assert!(radix < 256);
-        unsafe {
-            *self.0.get_unchecked_mut(radix) += count;
-        }
-    }
-
-    #[inline(always)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -306,34 +273,6 @@ impl Counts {
     #[inline]
     pub fn inner(&self) -> &[usize; 256] {
         &self.0
-    }
-}
-
-impl Iterator for CountIter<'_> {
-    type Item = usize;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.1 == 256 {
-            return None;
-        }
-
-        let out = self.0[self.1];
-        self.1 += 1;
-
-        Some(out)
-    }
-
-    #[inline(always)]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (256 - self.1, Some(256 - self.1))
-    }
-}
-
-impl ExactSizeIterator for CountIter<'_> {
-    #[inline(always)]
-    fn len(&self) -> usize {
-        256 - self.1
     }
 }
 
