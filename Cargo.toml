@@ -20,7 +20,7 @@ timings = ["multi-threaded"]
 
 [dependencies]
 rayon = { version = "1.8", optional = true }
-arbitrary-chunks = { path = "../arbitrary-chunks" }
+arbitrary-chunks = "0.4.1"
 partition = "0.1.2"
 bumpalo = { version = "3.14.0", features = ["collections"] }
 
