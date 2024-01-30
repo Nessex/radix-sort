@@ -33,7 +33,10 @@ use crate::sorts::out_of_place_sort::{
     lr_out_of_place_sort, lr_out_of_place_sort_with_counts, out_of_place_sort,
     out_of_place_sort_with_counts,
 };
-use crate::utils::*;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::counts::{CountMeta, Counts};
 use crate::RadixKey;
 
 impl<'a> Sorter<'a> {
@@ -41,97 +44,145 @@ impl<'a> Sorter<'a> {
         &self,
         lr: bool,
         bucket: &mut [T],
-        last_counts: &[usize; 256],
+        last_counts: Rc<RefCell<Counts>>,
         start_level: usize,
         end_level: usize,
     ) where
-        T: RadixKey + Sized + Send + Copy + Sync,
+        T: RadixKey + Sized + Send + Copy + Sync + 'a,
     {
         if bucket.len() < 2 {
             return;
         }
 
-        let mut tmp_bucket = get_tmp_bucket(bucket.len());
-        let levels: Vec<usize> = (start_level..=end_level).collect();
-        let mut invert = false;
-        let mut next_counts = None;
+        self.cm.with_tmp_buffer(bucket.len(), |cm, tmp_bucket| {
+            let mut invert = false;
+            let mut use_next_counts = false;
+            let mut counts = cm.get_empty_counts();
+            let mut meta = CountMeta::default();
+            let mut next_counts: Rc<RefCell<Counts>> = cm.get_empty_counts();
 
-        'outer: for level in levels {
-            let counts = if level == end_level {
-                *last_counts
-            } else if let Some(next_counts) = next_counts {
-                next_counts
-            } else {
-                let (counts, already_sorted) = get_counts(bucket, level);
-                if already_sorted {
-                    next_counts = None;
-                    continue 'outer;
-                }
+            for level in start_level..=end_level {
+                if level == end_level {
+                    cm.return_counts(counts);
+                    counts = last_counts.clone();
+                } else if use_next_counts {
+                    counts.borrow_mut().clear();
+                    (counts, next_counts) = (next_counts, counts);
+                } else {
+                    let mut c_mut = counts.borrow_mut();
+                    c_mut.clear();
+                    cm.count_into(&mut c_mut, &mut meta, bucket, level);
+                    drop(c_mut);
+                    next_counts.borrow_mut().clear();
 
-                counts
-            };
+                    if meta.already_sorted {
+                        use_next_counts = false;
+                        continue;
+                    }
+                };
 
-            for c in counts.iter() {
-                if *c == bucket.len() {
-                    next_counts = None;
-                    continue 'outer;
-                } else if *c > 0 {
-                    break;
-                }
+                let counts = counts.borrow();
+                let sums_rc = cm.prefix_sums(&counts);
+                let mut sums = sums_rc.borrow_mut();
+                let should_count = end_level != 0 && level < (end_level - 1);
+                use_next_counts = should_count;
+
+                match (lr, invert, should_count) {
+                    (true, true, true) => {
+                        let ends = cm.end_offsets(&counts, &sums);
+                        let scratch_counts = cm.get_empty_counts();
+                        lr_out_of_place_sort_with_counts(
+                            tmp_bucket,
+                            bucket,
+                            level,
+                            &mut sums,
+                            &mut ends.borrow_mut(),
+                            &mut next_counts.borrow_mut(),
+                            &mut scratch_counts.borrow_mut(),
+                        );
+                        cm.return_counts(ends);
+                        cm.return_counts(scratch_counts);
+                    }
+                    (true, true, false) => {
+                        let ends = cm.end_offsets(&counts, &sums);
+                        lr_out_of_place_sort(
+                            tmp_bucket,
+                            bucket,
+                            level,
+                            &mut sums,
+                            &mut ends.borrow_mut(),
+                        );
+                        cm.return_counts(ends);
+                    }
+                    (true, false, true) => {
+                        let ends = cm.end_offsets(&counts, &sums);
+                        let scratch_counts = cm.get_empty_counts();
+                        lr_out_of_place_sort_with_counts(
+                            bucket,
+                            tmp_bucket,
+                            level,
+                            &mut sums,
+                            &mut ends.borrow_mut(),
+                            &mut next_counts.borrow_mut(),
+                            &mut scratch_counts.borrow_mut(),
+                        );
+                        cm.return_counts(ends);
+                        cm.return_counts(scratch_counts);
+                    }
+                    (true, false, false) => {
+                        let ends = cm.end_offsets(&counts, &sums);
+                        lr_out_of_place_sort(
+                            bucket,
+                            tmp_bucket,
+                            level,
+                            &mut sums,
+                            &mut ends.borrow_mut(),
+                        );
+                        cm.return_counts(ends);
+                    }
+                    (false, true, true) => {
+                        let scratch_counts = cm.get_empty_counts();
+                        out_of_place_sort_with_counts(
+                            tmp_bucket,
+                            bucket,
+                            level,
+                            &mut sums,
+                            &mut next_counts.borrow_mut(),
+                            &mut scratch_counts.borrow_mut(),
+                        );
+                        cm.return_counts(scratch_counts);
+                    }
+                    (false, true, false) => out_of_place_sort(tmp_bucket, bucket, level, &mut sums),
+                    (false, false, true) => {
+                        let scratch_counts = cm.get_empty_counts();
+                        out_of_place_sort_with_counts(
+                            bucket,
+                            tmp_bucket,
+                            level,
+                            &mut sums,
+                            &mut next_counts.borrow_mut(),
+                            &mut scratch_counts.borrow_mut(),
+                        );
+                        cm.return_counts(scratch_counts);
+                    }
+                    (false, false, false) => {
+                        out_of_place_sort(bucket, tmp_bucket, level, &mut sums)
+                    }
+                };
+
+                drop(sums);
+                cm.return_counts(sums_rc);
+
+                invert = !invert;
             }
 
-            let should_count = end_level != 0 && level < (end_level - 1);
-            if !should_count {
-                next_counts = None;
+            cm.return_counts(counts);
+            cm.return_counts(next_counts);
+
+            if invert {
+                bucket.copy_from_slice(tmp_bucket);
             }
-
-            match (lr, invert, should_count) {
-                (true, true, true) => {
-                    next_counts = Some(lr_out_of_place_sort_with_counts(
-                        &tmp_bucket,
-                        bucket,
-                        &counts,
-                        level,
-                    ))
-                }
-                (true, true, false) => lr_out_of_place_sort(&tmp_bucket, bucket, &counts, level),
-                (true, false, true) => {
-                    next_counts = Some(lr_out_of_place_sort_with_counts(
-                        bucket,
-                        &mut tmp_bucket,
-                        &counts,
-                        level,
-                    ))
-                }
-                (true, false, false) => {
-                    lr_out_of_place_sort(bucket, &mut tmp_bucket, &counts, level)
-                }
-                (false, true, true) => {
-                    next_counts = Some(out_of_place_sort_with_counts(
-                        &tmp_bucket,
-                        bucket,
-                        &counts,
-                        level,
-                    ))
-                }
-                (false, true, false) => out_of_place_sort(&tmp_bucket, bucket, &counts, level),
-                (false, false, true) => {
-                    next_counts = Some(out_of_place_sort_with_counts(
-                        bucket,
-                        &mut tmp_bucket,
-                        &counts,
-                        level,
-                    ))
-                }
-                (false, false, false) => out_of_place_sort(bucket, &mut tmp_bucket, &counts, level),
-            };
-
-            invert = !invert;
-        }
-
-        if invert {
-            bucket.copy_from_slice(&tmp_bucket);
-        }
+        });
     }
 }
 
@@ -140,7 +191,6 @@ mod tests {
     use crate::sorter::Sorter;
     use crate::tuner::Algorithm;
     use crate::tuners::StandardTuner;
-    use crate::utils::get_counts;
     use crate::utils::test_utils::{
         sort_comparison_suite, sort_single_algorithm, validate_u32_patterns, NumericTest,
     };
@@ -150,18 +200,18 @@ mod tests {
     where
         T: NumericTest<T>,
     {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         sort_comparison_suite(shift, |inputs| {
-            let (counts, _) = get_counts(inputs, T::LEVELS - 1);
+            let sorter = Sorter::new(true, &StandardTuner);
+            let (counts, _) = sorter.cm.counts(inputs, T::LEVELS - 1);
 
-            sorter.lsb_sort_adapter(false, inputs, &counts, 0, T::LEVELS - 1)
+            sorter.lsb_sort_adapter(false, inputs, counts, 0, T::LEVELS - 1)
         });
 
         sort_comparison_suite(shift, |inputs| {
-            let (counts, _) = get_counts(inputs, T::LEVELS - 1);
+            let sorter = Sorter::new(true, &StandardTuner);
+            let (counts, _) = sorter.cm.counts(inputs, T::LEVELS - 1);
 
-            sorter.lsb_sort_adapter(true, inputs, &counts, 0, T::LEVELS - 1);
+            sorter.lsb_sort_adapter(true, inputs, counts, 0, T::LEVELS - 1);
         });
     }
 
@@ -209,9 +259,9 @@ mod tests {
     pub fn test_u32_patterns() {
         validate_u32_patterns(|inputs| {
             let sorter = Sorter::new(true, &StandardTuner);
-            let (counts, _) = get_counts(inputs, u32::LEVELS - 1);
+            let (counts, _) = sorter.cm.counts(inputs, u32::LEVELS - 1);
 
-            sorter.lsb_sort_adapter(true, inputs, &counts, 0, u32::LEVELS - 1);
+            sorter.lsb_sort_adapter(true, inputs, counts, 0, u32::LEVELS - 1);
         });
     }
 }

@@ -138,6 +138,7 @@
 //! ```
 //! use rdst::RadixSort;
 //! use rdst::tuner::{Algorithm, Tuner, TuningParams};
+//! use rdst::counts::Counts;
 //!
 //! struct MyTuner;
 //!
@@ -171,6 +172,8 @@
 //!
 //! Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
 
+extern crate core;
+
 mod radix_key;
 mod radix_key_impl;
 mod radix_sort_builder;
@@ -190,6 +193,7 @@ mod sorter;
 mod tuners;
 
 // Public modules
+pub mod counts;
 pub mod tuner;
 
 // Public exports

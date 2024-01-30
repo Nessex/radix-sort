@@ -3,7 +3,7 @@
 ![Crates.io](https://img.shields.io/crates/l/rdst?style=flat-square)
 ![Crates.io](https://img.shields.io/crates/v/rdst?style=flat-square)
 
-rdst is a flexible native Rust implementation of multi-threaded unstable radix sort.
+rdst is a flexible native Rust implementation of multithreaded unstable radix sort.
 
 ## Usage
 

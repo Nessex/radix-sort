@@ -9,7 +9,7 @@
 //! You may need to tweak the command below for your own machine.
 //!
 //! ```
-//! RUSTFLAGS='--cfg bench --cfg tuning -C opt-level=3 -C target-cpu=native -C target-feature=+neon' cargo +nightly run --bin timings --features timings -- 1234 "Hello world"
+//! RUSTFLAGS='--cfg bench --cfg tuning -C opt-level=3 -C target-cpu=apple-m1 -C target-feature=+neon' cargo +nightly run --bin timings --features timings -- 1234 "Hello world"
 //! ```
 //!
 //!  - `1234` is where you place the ID for your run. If you are just running a brief test this can be `N/A`, otherwise it should be something like a commit SHA that you can use to find the code for this run again.

@@ -28,7 +28,7 @@ use std::cmp::Ordering;
 impl<'a> Sorter<'a> {
     pub(crate) fn comparative_sort<T>(&self, bucket: &mut [T], start_level: usize)
     where
-        T: RadixKey + Sized + Send + Copy + Sync,
+        T: RadixKey + Sized + Send + Copy + Sync + 'a,
     {
         if bucket.len() < 2 {
             return;
@@ -64,9 +64,8 @@ mod tests {
     where
         T: NumericTest<T>,
     {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         sort_comparison_suite(shift, |inputs| {
+            let sorter = Sorter::new(true, &StandardTuner);
             sorter.comparative_sort(inputs, T::LEVELS - 1);
         });
     }
@@ -108,9 +107,8 @@ mod tests {
 
     #[test]
     pub fn test_u32_patterns() {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         validate_u32_patterns(|inputs| {
+            let sorter = Sorter::new(true, &StandardTuner);
             sorter.comparative_sort(inputs, u32::LEVELS - 1);
         });
     }

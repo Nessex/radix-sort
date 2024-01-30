@@ -22,76 +22,89 @@
 //! constraints. As this is an out-of-place algorithm, you need 2n memory relative to the input for
 //! this sort, and eventually the extra allocation and freeing required eats away at the performance.
 
+use crate::counts::{CountManager, Counts};
 use crate::sorter::Sorter;
 use crate::sorts::out_of_place_sort::out_of_place_sort;
-use crate::utils::*;
 use crate::RadixKey;
 use arbitrary_chunks::ArbitraryChunks;
 use rayon::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub fn recombinating_sort<T>(
+    cm: &CountManager,
     bucket: &mut [T],
-    counts: &[usize; 256],
-    tile_counts: &[[usize; 256]],
+    counts: &Counts,
+    tile_counts: Vec<Counts>,
     tile_size: usize,
     level: usize,
 ) where
     T: RadixKey + Sized + Send + Copy + Sync,
 {
     let bucket_len = bucket.len();
-    let mut tmp_bucket = get_tmp_bucket::<T>(bucket_len);
 
-    let locals: Vec<([usize; 256], [usize; 256])> = bucket
-        .par_chunks(tile_size)
-        .zip(tmp_bucket.par_chunks_mut(tile_size))
-        .zip(tile_counts.into_par_iter())
-        .map(|((chunk, tmp_chunk), counts)| {
-            out_of_place_sort(chunk, tmp_chunk, counts, level);
+    cm.with_tmp_buffer(bucket_len, |cm, tmp_bucket| {
+        bucket
+            .par_chunks(tile_size)
+            .zip(tmp_bucket.par_chunks_mut(tile_size))
+            .zip(tile_counts.par_iter())
+            .for_each(|((chunk, tmp_chunk), counts)| {
+                let sums = cm.prefix_sums(counts);
+                out_of_place_sort(chunk, tmp_chunk, level, &mut sums.borrow_mut());
+                cm.return_counts(sums);
+            });
 
-            let sums = get_prefix_sums(counts);
+        bucket
+            .arbitrary_chunks_mut(counts.inner())
+            .enumerate()
+            .par_bridge()
+            .for_each(|(index, global_chunk)| {
+                let mut read_offset = 0;
+                let mut write_offset = 0;
 
-            (*counts, sums)
-        })
-        .collect();
+                for tile_c in tile_counts.iter() {
+                    let sum = if index == 0 {
+                        0
+                    } else {
+                        tile_c.into_iter().take(index).sum::<usize>()
+                    };
+                    let read_start = read_offset + sum;
+                    let read_end = read_start + tile_c[index];
+                    let read_slice = &tmp_bucket[read_start..read_end];
+                    let write_end = write_offset + read_slice.len();
 
-    bucket
-        .arbitrary_chunks_mut(counts)
-        .enumerate()
-        .par_bridge()
-        .for_each(|(index, global_chunk)| {
-            let mut read_offset = 0;
-            let mut write_offset = 0;
+                    global_chunk[write_offset..write_end].copy_from_slice(read_slice);
 
-            for (counts, sums) in locals.iter() {
-                let read_start = read_offset + sums[index];
-                let read_end = read_start + counts[index];
-                let read_slice = &tmp_bucket[read_start..read_end];
-                let write_end = write_offset + read_slice.len();
-
-                global_chunk[write_offset..write_end].copy_from_slice(read_slice);
-
-                read_offset += tile_size;
-                write_offset = write_end;
-            }
-        });
+                    read_offset += tile_size;
+                    write_offset = write_end;
+                }
+            });
+    });
 }
 
 impl<'a> Sorter<'a> {
     pub(crate) fn recombinating_sort_adapter<T>(
         &self,
         bucket: &mut [T],
-        counts: &[usize; 256],
-        tile_counts: &[[usize; 256]],
+        counts: Rc<RefCell<Counts>>,
+        tile_counts: Vec<Counts>,
         tile_size: usize,
         level: usize,
     ) where
-        T: RadixKey + Sized + Send + Copy + Sync,
+        T: RadixKey + Sized + Send + Copy + Sync + 'a,
     {
         if bucket.len() < 2 {
             return;
         }
 
-        recombinating_sort(bucket, counts, tile_counts, tile_size, level);
+        recombinating_sort(
+            &self.cm,
+            bucket,
+            &counts.borrow(),
+            tile_counts,
+            tile_size,
+            level,
+        );
 
         if level == 0 {
             return;
@@ -103,6 +116,8 @@ impl<'a> Sorter<'a> {
 
 #[cfg(test)]
 mod tests {
+
+    use crate::counts::CountManager;
     use crate::sorter::Sorter;
     use crate::tuner::Algorithm;
     use crate::tuners::StandardTuner;
@@ -117,8 +132,6 @@ mod tests {
     where
         T: NumericTest<T>,
     {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         sort_comparison_suite(shift, |inputs| {
             let level = T::LEVELS - 1;
             let tile_size = cdiv(inputs.len(), current_num_threads());
@@ -127,16 +140,13 @@ mod tests {
                 return;
             }
 
-            let (tile_counts, _) = get_tile_counts(inputs, tile_size, level);
-            let counts = aggregate_tile_counts(&tile_counts);
+            let cm = CountManager::default();
+            let sorter = Sorter::new(true, &StandardTuner);
 
-            sorter.recombinating_sort_adapter(
-                inputs,
-                &counts,
-                &tile_counts,
-                tile_size,
-                T::LEVELS - 1,
-            )
+            let (tile_counts, _) = get_tile_counts(&cm, inputs, tile_size, level);
+            let counts = aggregate_tile_counts(&cm, &tile_counts);
+
+            sorter.recombinating_sort_adapter(inputs, counts, tile_counts, tile_size, T::LEVELS - 1)
         });
     }
 
@@ -177,8 +187,6 @@ mod tests {
 
     #[test]
     pub fn test_u32_patterns() {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         validate_u32_patterns(|inputs| {
             let level = u32::LEVELS - 1;
             let tile_size = cdiv(inputs.len(), current_num_threads());
@@ -187,10 +195,13 @@ mod tests {
                 return;
             }
 
-            let (tile_counts, _) = get_tile_counts(inputs, tile_size, level);
-            let counts = aggregate_tile_counts(&tile_counts);
+            let cm = CountManager::default();
+            let sorter = Sorter::new(true, &StandardTuner);
 
-            sorter.recombinating_sort_adapter(inputs, &counts, &tile_counts, tile_size, level)
+            let (tile_counts, _) = get_tile_counts(&cm, inputs, tile_size, level);
+            let counts = aggregate_tile_counts(&cm, &tile_counts);
+
+            sorter.recombinating_sort_adapter(inputs, counts, tile_counts, tile_size, level)
         });
     }
 }

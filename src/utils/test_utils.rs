@@ -96,7 +96,7 @@ where
 
 pub fn validate_sort<T, F>(mut inputs: Vec<T>, sort_fn: F)
 where
-    T: NumericTest<T>,
+    T: NumericTest<T> + Debug,
     F: Fn(&mut [T]),
 {
     let mut inputs_clone = inputs.clone();
@@ -117,6 +117,18 @@ where
     }
 
     inputs_clone.sort_unstable();
+
+    for i in 0..inputs.len() {
+        let a = inputs[i];
+        let b = inputs_clone[i];
+        assert_eq!(
+            a,
+            b,
+            "Mismatch at index {:?} vs. {:?}",
+            inputs[i - 5..i + 5].to_vec(),
+            inputs_clone[i - 5..i + 5].to_vec()
+        );
+    }
     assert_eq!(inputs, inputs_clone);
 }
 
