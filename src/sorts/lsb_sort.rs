@@ -71,7 +71,11 @@ impl<'a> Sorter<'a> {
                 } else {
                     let mut c_mut = counts.borrow_mut();
                     c_mut.clear();
-                    cm.count_into(&mut c_mut, &mut meta, bucket, level);
+                    if invert {
+                        cm.count_into(&mut c_mut, &mut meta, tmp_bucket, level);
+                    } else {
+                        cm.count_into(&mut c_mut, &mut meta, bucket, level);
+                    }
                     drop(c_mut);
                     next_counts.borrow_mut().clear();
 

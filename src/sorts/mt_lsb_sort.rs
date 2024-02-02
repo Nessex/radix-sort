@@ -38,7 +38,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub fn mt_lsb_sort<T>(
-    src_bucket: &mut [T],
+    src_bucket: &[T],
     dst_bucket: &mut [T],
     tile_counts: &[Counts],
     tile_size: usize,
