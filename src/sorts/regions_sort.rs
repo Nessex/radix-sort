@@ -40,12 +40,15 @@
 
 use crate::sorter::Sorter;
 use crate::sorts::ska_sort::ska_sort;
-use crate::utils::*;
+use std::cell::RefCell;
+
+use crate::counts::{CountManager, Counts};
 use crate::RadixKey;
 use partition::partition_index;
 use rayon::current_num_threads;
 use rayon::prelude::*;
 use std::cmp::{min, Ordering};
+use std::rc::Rc;
 
 /// Operation represents a pair of edges, which have content slices that need to be swapped.
 struct Operation<'bucket, T>(Edge<'bucket, T>, Edge<'bucket, T>);
@@ -65,10 +68,10 @@ struct Edge<'bucket, T> {
 /// for that country.
 fn generate_outbounds<'bucket, T>(
     bucket: &'bucket mut [T],
-    local_counts: &[[usize; 256]],
-    global_counts: &[usize; 256],
+    local_counts: &[Counts],
+    global_counts: &Counts,
 ) -> Vec<Edge<'bucket, T>> {
-    let mut outbounds: Vec<Edge<T>> = Vec::new();
+    let mut outbounds: Vec<Edge<T>> = Vec::with_capacity(256);
     let mut rem_bucket = bucket;
     let mut local_bucket = 0;
     let mut local_country = 0;
@@ -123,37 +126,40 @@ fn generate_outbounds<'bucket, T>(
 }
 
 /// list_operations takes the lists of outbounds and turns it into a list of swaps to perform
-fn list_operations<T>(
+fn list_operations<'a, T>(
     country: usize,
-    mut outbounds: Vec<Edge<T>>,
-) -> (Vec<Edge<T>>, Vec<Operation<T>>) {
+    outbounds: &mut Vec<Edge<'a, T>>,
+    operations: &mut Vec<Operation<'a, T>>,
+    inbounds_scratch: &mut Vec<Edge<'a, T>>,
+    outbounds_scratch: &mut Vec<Edge<'a, T>>,
+) {
+    // 2. Calculate inbounds for country
+    let ib = partition_index(outbounds, |e| e.dst != country);
+    inbounds_scratch.extend(outbounds.drain(ib..));
+    outbounds.truncate(ib);
+
     // 1. Extract current country outbounds from full outbounds list
     // NOTE(nathan): Partitioning a single array benched faster than
     // keeping an array per country (256 arrays total).
-    let ob = partition_index(&mut outbounds, |e| e.init != country);
-    let mut current_outbounds = outbounds.split_off(ob);
-
-    // 2. Calculate inbounds for country
-    let p = partition_index(&mut outbounds, |e| e.dst != country);
-    let mut inbounds = outbounds.split_off(p);
+    let ob = partition_index(outbounds, |e| e.init != country);
+    outbounds_scratch.extend(outbounds.drain(ob..));
+    outbounds.truncate(ob);
 
     // 3. Pair up inbounds & outbounds into an operation, returning unmatched data to the working arrays
-    let mut operations = Vec::new();
-
     loop {
-        let i = match inbounds.pop() {
+        let i = match inbounds_scratch.pop() {
             Some(i) => i,
             None => {
-                outbounds.append(&mut current_outbounds);
+                outbounds.append(outbounds_scratch);
                 break;
             }
         };
 
-        let o = match current_outbounds.pop() {
+        let o = match outbounds_scratch.pop() {
             Some(o) => o,
             None => {
                 outbounds.push(i);
-                outbounds.append(&mut inbounds);
+                outbounds.append(inbounds_scratch);
                 break;
             }
         };
@@ -163,7 +169,7 @@ fn list_operations<T>(
             Ordering::Less => {
                 let (sl, rem) = o.slice.split_at_mut(i.slice.len());
 
-                current_outbounds.push(Edge {
+                outbounds_scratch.push(Edge {
                     dst: o.dst,
                     init: o.init,
                     slice: rem,
@@ -180,7 +186,7 @@ fn list_operations<T>(
             Ordering::Greater => {
                 let (sl, rem) = i.slice.split_at_mut(o.slice.len());
 
-                inbounds.push(Edge {
+                inbounds_scratch.push(Edge {
                     dst: i.dst,
                     init: i.init,
                     slice: rem,
@@ -198,15 +204,13 @@ fn list_operations<T>(
 
         operations.push(op);
     }
-
-    // 4. Return the paired operations
-    (outbounds, operations)
 }
 
 pub fn regions_sort<T>(
+    cm: &CountManager,
     bucket: &mut [T],
-    counts: &[usize; 256],
-    tile_counts: &[[usize; 256]],
+    counts: &Counts,
+    tile_counts: Vec<Counts>,
     tile_size: usize,
     level: usize,
 ) where
@@ -217,13 +221,22 @@ pub fn regions_sort<T>(
         .par_chunks_mut(tile_size)
         .zip(tile_counts.par_iter())
         .for_each(|(chunk, counts)| {
-            let mut prefix_sums = get_prefix_sums(counts);
-            let end_offsets = get_end_offsets(counts, &prefix_sums);
-            ska_sort(chunk, &mut prefix_sums, &end_offsets, level);
+            let prefix_sums = cm.prefix_sums(counts);
+            let end_offsets = cm.end_offsets(counts, &prefix_sums.borrow());
+            ska_sort(
+                chunk,
+                &mut prefix_sums.borrow_mut(),
+                &end_offsets.borrow(),
+                level,
+            );
+            cm.return_counts(prefix_sums);
+            cm.return_counts(end_offsets);
         });
 
-    let mut outbounds = generate_outbounds(bucket, tile_counts, counts);
-    let mut operations = Vec::new();
+    let mut outbounds = generate_outbounds(bucket, &tile_counts, counts);
+    let mut operations = Vec::with_capacity(2048);
+    let mut inbounds_scratch = Vec::with_capacity(256);
+    let mut outbounds_scratch = Vec::with_capacity(256);
 
     // This loop calculates and executes all operations that can be done in parallel, each pass.
     loop {
@@ -233,9 +246,13 @@ pub fn regions_sort<T>(
 
         // List out all the operations that need to be executed in this pass
         for country in 0..256 {
-            let (new_outbounds, mut new_ops) = list_operations(country, outbounds);
-            outbounds = new_outbounds;
-            operations.append(&mut new_ops);
+            list_operations(
+                country,
+                &mut outbounds,
+                &mut operations,
+                &mut inbounds_scratch,
+                &mut outbounds_scratch,
+            );
         }
 
         if operations.is_empty() {
@@ -265,18 +282,22 @@ impl<'a> Sorter<'a> {
     pub(crate) fn regions_sort_adapter<T>(
         &self,
         bucket: &mut [T],
-        counts: &[usize; 256],
-        tile_counts: &[[usize; 256]],
+        counts: Rc<RefCell<Counts>>,
+        tile_counts: Vec<Counts>,
         tile_size: usize,
         level: usize,
     ) where
-        T: RadixKey + Sized + Send + Copy + Sync,
+        T: RadixKey + Sized + Send + Copy + Sync + 'a,
     {
         if bucket.len() < 2 {
             return;
         }
 
-        regions_sort(bucket, counts, tile_counts, tile_size, level);
+        let c = counts.borrow();
+
+        regions_sort(&self.cm, bucket, &c, tile_counts, tile_size, level);
+
+        drop(c);
 
         if level == 0 {
             return;
@@ -288,6 +309,7 @@ impl<'a> Sorter<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::counts::CountManager;
     use crate::sorter::Sorter;
     use crate::tuner::Algorithm;
     use crate::tuners::StandardTuner;
@@ -302,18 +324,18 @@ mod tests {
     where
         T: NumericTest<T>,
     {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         sort_comparison_suite(shift, |inputs| {
+            let cm = CountManager::default();
+            let sorter = Sorter::new(true, &StandardTuner);
             if inputs.len() == 0 {
                 return;
             }
 
             let tile_size = cdiv(inputs.len(), current_num_threads());
-            let (tile_counts, _) = get_tile_counts(inputs, tile_size, T::LEVELS - 1);
-            let counts = aggregate_tile_counts(&tile_counts);
+            let (tile_counts, _) = get_tile_counts(&cm, inputs, tile_size, T::LEVELS - 1);
+            let counts = aggregate_tile_counts(&cm, &tile_counts);
 
-            sorter.regions_sort_adapter(inputs, &counts, &tile_counts, tile_size, T::LEVELS - 1);
+            sorter.regions_sort_adapter(inputs, counts, tile_counts, tile_size, T::LEVELS - 1);
         });
     }
 
@@ -354,18 +376,19 @@ mod tests {
 
     #[test]
     pub fn test_u32_patterns() {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         validate_u32_patterns(|inputs| {
             if inputs.len() == 0 {
                 return;
             }
 
-            let tile_size = cdiv(inputs.len(), current_num_threads());
-            let (tile_counts, _) = get_tile_counts(inputs, tile_size, u32::LEVELS - 1);
-            let counts = aggregate_tile_counts(&tile_counts);
+            let cm = CountManager::default();
+            let sorter = Sorter::new(true, &StandardTuner);
 
-            sorter.regions_sort_adapter(inputs, &counts, &tile_counts, tile_size, u32::LEVELS - 1);
+            let tile_size = cdiv(inputs.len(), current_num_threads());
+            let (tile_counts, _) = get_tile_counts(&cm, inputs, tile_size, u32::LEVELS - 1);
+            let counts = aggregate_tile_counts(&cm, &tile_counts);
+
+            sorter.regions_sort_adapter(inputs, counts, tile_counts, tile_size, u32::LEVELS - 1);
         });
     }
 }

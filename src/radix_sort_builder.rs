@@ -104,6 +104,7 @@ where
     /// ```
     /// use rdst::RadixSort;
     /// use rdst::tuner::{Algorithm, Tuner, TuningParams};
+    /// use rdst::counts::Counts;
     ///
     /// struct MyTuner;
     ///

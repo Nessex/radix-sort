@@ -6,7 +6,6 @@ use criterion::{
 use rdst::{RadixKey, RadixSort};
 use std::cmp::Ordering;
 use std::time::Duration;
-use voracious_radix_sort::{RadixSort as Vor, Radixable};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LargeStruct {
@@ -37,15 +36,6 @@ impl PartialEq for LargeStruct {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.sort_key == other.sort_key
-    }
-}
-
-impl Radixable<f32> for LargeStruct {
-    type Key = f32;
-
-    #[inline]
-    fn key(&self) -> Self::Key {
-        self.sort_key
     }
 }
 
@@ -98,13 +88,6 @@ fn full_sort_struct(c: &mut Criterion) {
                     .radix_sort_builder()
                     .with_single_threaded_tuner()
                     .sort();
-                black_box(input);
-            }),
-        ),
-        (
-            "voracious",
-            Box::new(|mut input| {
-                input.voracious_sort();
                 black_box(input);
             }),
         ),

@@ -33,14 +33,16 @@
 //! overhead of the thread-local stores and mutexes prevents it from being fast for smaller inputs
 //! however, so it should not be used in all situations.
 
+use crate::counts::{Counts, PrefixSums};
 use crate::sorter::Sorter;
-use crate::utils::*;
 use crate::RadixKey;
 use arbitrary_chunks::ArbitraryChunks;
 use partition::partition_index;
 use rayon::current_num_threads;
 use rayon::prelude::*;
+use std::cell::RefCell;
 use std::cmp::{max, min};
+use std::rc::Rc;
 use std::sync::Mutex;
 
 struct ScannerBucketInner<'a, T> {
@@ -58,13 +60,13 @@ struct ScannerBucket<'a, T> {
 
 #[inline]
 fn get_scanner_buckets<'a, T>(
-    counts: &[usize; 256],
-    prefix_sums: &[usize; 256],
+    counts: &Counts,
+    prefix_sums: &PrefixSums,
     bucket: &'a mut [T],
 ) -> Vec<ScannerBucket<'a, T>> {
     let mut running_count = 0;
     let mut out: Vec<_> = bucket
-        .arbitrary_chunks_mut(counts)
+        .arbitrary_chunks_mut(counts.inner())
         .enumerate()
         .map(|(index, chunk)| {
             let head = prefix_sums[index] - running_count;
@@ -97,8 +99,7 @@ fn scanner_thread<T>(
 ) where
     T: RadixKey + Copy,
 {
-    let mut stash: Vec<Vec<T>> = Vec::with_capacity(256);
-    stash.resize(256, Vec::with_capacity(128));
+    let mut stash: Vec<Vec<T>> = vec![Vec::new(); 256];
     let mut finished_count = 0;
     let mut finished_map = [false; 256];
 
@@ -201,11 +202,10 @@ fn scanner_thread<T>(
 
             let to_write = to_write as usize;
             let split = stash[m.index].len() - to_write;
-            let some = stash[m.index].split_off(split);
             let end = guard.write_head + to_write;
             let start = guard.write_head;
-
-            guard.chunk[start..end].copy_from_slice(&some);
+            guard.chunk[start..end].copy_from_slice(&stash[m.index][split..]);
+            stash[m.index].truncate(split);
 
             guard.write_head += to_write;
 
@@ -221,15 +221,14 @@ fn scanner_thread<T>(
     }
 }
 
-pub fn scanning_sort<T>(bucket: &mut [T], counts: &[usize; 256], level: usize)
+pub fn scanning_sort<T>(bucket: &mut [T], counts: &Counts, prefix_sums: &PrefixSums, level: usize)
 where
     T: RadixKey + Sized + Send + Copy + Sync,
 {
     let len = bucket.len();
     let threads = current_num_threads();
     let uniform_threshold = ((len / threads) as f64 * 1.4) as usize;
-    let prefix_sums = get_prefix_sums(counts);
-    let scanner_buckets = get_scanner_buckets(counts, &prefix_sums, bucket);
+    let scanner_buckets = get_scanner_buckets(counts, prefix_sums, bucket);
     let threads = min(threads, scanner_buckets.len());
     let scaling_factor = max(1, (threads as f32).log2().ceil() as isize) as usize;
     let scanner_read_size = (32768 / scaling_factor) as isize;
@@ -251,16 +250,18 @@ impl<'a> Sorter<'a> {
     pub(crate) fn scanning_sort_adapter<T>(
         &self,
         bucket: &mut [T],
-        counts: &[usize; 256],
+        counts: Rc<RefCell<Counts>>,
         level: usize,
     ) where
-        T: RadixKey + Sized + Send + Copy + Sync,
+        T: RadixKey + Sized + Send + Copy + Sync + 'a,
     {
         if bucket.len() < 2 {
             return;
         }
 
-        scanning_sort(bucket, counts, level);
+        let prefix_sums = self.cm.prefix_sums(&counts.borrow());
+        scanning_sort(bucket, &counts.borrow(), &prefix_sums.borrow(), level);
+        self.cm.return_counts(prefix_sums);
 
         if level == 0 {
             return;
@@ -272,10 +273,10 @@ impl<'a> Sorter<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::counts::CountManager;
     use crate::sorter::Sorter;
     use crate::tuner::Algorithm;
     use crate::tuners::StandardTuner;
-    use crate::utils::par_get_counts;
     use crate::utils::test_utils::{
         sort_comparison_suite, sort_single_algorithm, validate_u32_patterns, NumericTest,
     };
@@ -285,12 +286,12 @@ mod tests {
     where
         T: NumericTest<T>,
     {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         sort_comparison_suite(shift, |inputs| {
-            let (counts, _) = par_get_counts(inputs, T::LEVELS - 1);
+            let cm = CountManager::default();
+            let sorter = Sorter::new(true, &StandardTuner);
+            let (counts, _) = cm.counts(inputs, T::LEVELS - 1);
 
-            sorter.scanning_sort_adapter(inputs, &counts, T::LEVELS - 1)
+            sorter.scanning_sort_adapter(inputs, counts, T::LEVELS - 1)
         });
     }
 
@@ -331,12 +332,12 @@ mod tests {
 
     #[test]
     pub fn test_u32_patterns() {
-        let sorter = Sorter::new(true, &StandardTuner);
-
         validate_u32_patterns(|inputs| {
-            let (counts, _) = par_get_counts(inputs, u32::LEVELS - 1);
+            let cm = CountManager::default();
+            let sorter = Sorter::new(true, &StandardTuner);
+            let (counts, _) = cm.counts(inputs, u32::LEVELS - 1);
 
-            sorter.scanning_sort_adapter(inputs, &counts, u32::LEVELS - 1)
+            sorter.scanning_sort_adapter(inputs, counts, u32::LEVELS - 1)
         });
     }
 }
