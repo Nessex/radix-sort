@@ -34,10 +34,10 @@ impl Tuner for MyTuner {
 fn main() {
     // Randomly generate an array of
     // 200_000_000 u64's with half shifted >> 32 and half shifted << 32
-    let mut inputs = gen_inputs(200_000_000, 0u32);
-    let mut inputs_2 = gen_inputs(200_000_000, 0u32);
+    let mut inputs = gen_inputs(50_000_000, 0u128);
+    let mut inputs_2 = gen_inputs(50_000_000, 0u128);
 
-    // Input generation is multi-threaded and hard to differentiate from the actual
+    // Input generation is multithreaded and hard to differentiate from the actual
     // sorting algorithm, depending on the profiler. This makes it more obvious.
     sleep(Duration::from_millis(300));
 

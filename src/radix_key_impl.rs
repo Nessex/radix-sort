@@ -16,8 +16,12 @@ impl RadixKey for u16 {
     fn get_level(&self, level: usize) -> u8 {
         debug_assert!(level < Self::LEVELS);
 
-        if cfg!(target_endian="little") {
-            unsafe { (self as *const Self as *const u8).wrapping_offset(level as isize).read() }
+        if cfg!(target_endian = "little") {
+            unsafe {
+                (self as *const Self as *const u8)
+                    .wrapping_offset(level as isize)
+                    .read()
+            }
         } else {
             (self >> (level * 8)) as u8
         }
@@ -31,8 +35,12 @@ impl RadixKey for u32 {
     fn get_level(&self, level: usize) -> u8 {
         debug_assert!(level < Self::LEVELS);
 
-        if cfg!(target_endian="little") {
-            unsafe { (self as *const Self as *const u8).wrapping_offset(level as isize).read() }
+        if cfg!(target_endian = "little") {
+            unsafe {
+                (self as *const Self as *const u8)
+                    .wrapping_offset(level as isize)
+                    .read()
+            }
         } else {
             (self >> (level * 8)) as u8
         }
@@ -46,8 +54,12 @@ impl RadixKey for u64 {
     fn get_level(&self, level: usize) -> u8 {
         debug_assert!(level < Self::LEVELS);
 
-        if cfg!(target_endian="little") {
-            unsafe { (self as *const Self as *const u8).wrapping_offset(level as isize).read() }
+        if cfg!(target_endian = "little") {
+            unsafe {
+                (self as *const Self as *const u8)
+                    .wrapping_offset(level as isize)
+                    .read()
+            }
         } else {
             (self >> (level * 8)) as u8
         }
@@ -61,8 +73,12 @@ impl RadixKey for u128 {
     fn get_level(&self, level: usize) -> u8 {
         debug_assert!(level < Self::LEVELS);
 
-        if cfg!(target_endian="little") {
-            unsafe { (self as *const Self as *const u8).wrapping_offset(level as isize).read() }
+        if cfg!(target_endian = "little") {
+            unsafe {
+                (self as *const Self as *const u8)
+                    .wrapping_offset(level as isize)
+                    .read()
+            }
         } else {
             (self >> (level * 8)) as u8
         }
@@ -77,8 +93,12 @@ impl RadixKey for usize {
     fn get_level(&self, level: usize) -> u8 {
         debug_assert!(level < Self::LEVELS);
 
-        if cfg!(target_endian="little") {
-            unsafe { (self as *const Self as *const u8).wrapping_offset(level as isize).read() }
+        if cfg!(target_endian = "little") {
+            unsafe {
+                (self as *const Self as *const u8)
+                    .wrapping_offset(level as isize)
+                    .read()
+            }
         } else {
             (self >> (level * 8)) as u8
         }
@@ -93,8 +113,12 @@ impl RadixKey for usize {
     fn get_level(&self, level: usize) -> u8 {
         debug_assert!(level < Self::LEVELS);
 
-        if cfg!(target_endian="little") {
-            unsafe { (self as *const Self as *const u8).wrapping_offset(level as isize).read() }
+        if cfg!(target_endian = "little") {
+            unsafe {
+                (self as *const Self as *const u8)
+                    .wrapping_offset(level as isize)
+                    .read()
+            }
         } else {
             (self >> (level * 8)) as u8
         }
@@ -109,8 +133,12 @@ impl RadixKey for usize {
     fn get_level(&self, level: usize) -> u8 {
         debug_assert!(level < Self::LEVELS);
 
-        if cfg!(target_endian="little") {
-            unsafe { (self as *const Self as *const u8).wrapping_offset(level as isize).read() }
+        if cfg!(target_endian = "little") {
+            unsafe {
+                (self as *const Self as *const u8)
+                    .wrapping_offset(level as isize)
+                    .read()
+            }
         } else {
             (self >> (level * 8)) as u8
         }
