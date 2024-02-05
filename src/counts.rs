@@ -242,7 +242,7 @@ impl Counter {
             let a = chunk.get_unchecked(0).get_level(level) as usize * 4;
             let b = chunk.get_unchecked(1).get_level(level) as usize * 4 + 1;
             let c = chunk.get_unchecked(2).get_level(level) as usize * 4 + 2;
-            let d = chunk.get_unchecked(3).get_level(level) as usize * 4 + 4;
+            let d = chunk.get_unchecked(3).get_level(level) as usize * 4 + 3;
 
             debug_assert!(a < 1024);
             debug_assert!(b < 1024);
