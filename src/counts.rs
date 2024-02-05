@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 
 use std::ops::{Index, IndexMut};
+use std::ptr::copy_nonoverlapping;
 
 use crate::RadixKey;
-use bumpalo::Bump;
 use std::rc::Rc;
 use std::slice::{Iter, SliceIndex};
 
@@ -65,7 +65,7 @@ pub struct CountMeta {
 struct ThreadContext {
     pub counter: RefCell<Counter>,
     pub counts: RefCell<Vec<Rc<RefCell<Counts>>>>,
-    pub bump: Bump,
+    pub tmp: RefCell<Vec<u8>>,
 }
 
 impl CountManager {
@@ -153,28 +153,29 @@ impl CountManager {
         T: Copy,
         F: FnMut(&CountManager, &mut [T], &mut [T]),
     {
-        let len = src_bucket.len();
         Self::THREAD_CTX.with(|ct| {
-            let mut tmp = bumpalo::collections::Vec::with_capacity_in(len, &ct.bump);
+            let byte_len = std::mem::size_of_val(src_bucket);
+            let mut t = ct.tmp.borrow_mut();
 
-            // Safety: Vec has the same capacity as the input size, and set_len is not called to set
-            // the full vec len until after all data has been initialized. Source data is Copy
-            // so a full copy of the source data is sufficient for initialization.
-
-            // Note: This is done rather than something like extend because the performance
-            // is significantly better. Extend and co. use push and therefore increment len for each item
-            // where this simply copies all the data first then sets len once.
-
-            // Existing data is used rather than just leaving it uninitialized until write because
-            // doing so is undefined behavior and MaybeUninit creates a bunch of code duplication and bloat.
-            // There's only a minor performance hit for using the copy instead of overwriting uninitialized data.
-            unsafe {
-                std::ptr::copy_nonoverlapping(src_bucket.as_ptr(), tmp.as_mut_ptr(), len);
-                tmp.set_len(len);
+            if t.len() < byte_len {
+                *t = Vec::with_capacity(byte_len);
             }
-            f(self, src_bucket, &mut tmp);
-            drop(tmp);
-        })
+
+            // Safety: The buffer is guaranteed to have enough capacity by the logic above.
+            // As the data is copied from the source buffer to the temporary buffer, and
+            // T is Copy, the data is therefore correctly initialized (assuming the source itself is).
+            // Len is set to 0 until the end to ensure that the compiler doesn't assume the buffer
+            // is fully initialized before that point.
+            let tmp = unsafe {
+                t.set_len(0);
+                let ptr = t.as_mut_ptr() as *mut T;
+                copy_nonoverlapping(src_bucket.as_ptr(), ptr, src_bucket.len());
+                t.set_len(byte_len);
+                std::slice::from_raw_parts_mut(ptr, src_bucket.len())
+            };
+
+            f(self, src_bucket, tmp);
+        });
     }
 }
 

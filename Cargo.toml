@@ -22,22 +22,16 @@ timings = ["multi-threaded"]
 rayon = { version = "1.8", optional = true }
 arbitrary-chunks = "0.4.1"
 partition = "0.1.2"
-bumpalo = { version = "3.14.0", features = ["collections"] }
 
 [dev-dependencies]
 rayon = "1.8"
-criterion = "0.5.1"
 block-pseudorand = "0.1.2"
 dhat = "0.3.2"
-
-[target.'cfg(all(not(target_env = "msvc"), tuning))'.dependencies]
-tikv-jemallocator = "0.5.4"
 
 # Workaround for reducing compile time when not tuning or benchmarking
 # Suggestions for a better alternative very welcome...
 [target.'cfg(any(bench, tuning))'.dependencies]
-voracious_radix_sort = { version = "1.2", features = ["voracious_multithread"] }
-criterion = "0.5.1"
+criterion = { version = "0.5.1", default-features=false, features = ["rayon", "cargo_bench_support"] }
 block-pseudorand = "0.1.2"
 
 [profile.release]
@@ -47,16 +41,19 @@ opt-level = 3
 [[bench]]
 name = "basic_sort"
 harness = false
+bench = false
 required-features = ["multi-threaded"]
 
 [[bench]]
 name = "full_sort"
 harness = false
+bench = false
 required-features = ["multi-threaded"]
 
 [[bench]]
 name = "struct_sort"
 harness = false
+bench = false
 required-features = ["multi-threaded"]
 
 [[bin]]

@@ -24,12 +24,6 @@ compile_error!("This binary must be run with `RUSTFLAGS='--cfg tuning --cfg benc
 use rdst::utils::bench_utils::gen_bench_exponential_input_set;
 use rdst::{RadixKey, RadixSort};
 use std::time::Instant;
-#[cfg(all(tuning, not(target_env = "msvc")))]
-use tikv_jemallocator::Jemalloc;
-
-#[cfg(all(tuning, not(target_env = "msvc")))]
-#[global_allocator]
-static ALLOC: Jemalloc = Jemalloc;
 
 fn print_row(data: Vec<String>) {
     let mut first = true;

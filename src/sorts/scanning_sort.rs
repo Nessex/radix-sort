@@ -99,7 +99,7 @@ fn scanner_thread<T>(
 ) where
     T: RadixKey + Copy,
 {
-    let mut stash: Vec<Vec<T>> = vec![Vec::with_capacity(128); 256];
+    let mut stash: Vec<Vec<T>> = vec![Vec::new(); 256];
     let mut finished_count = 0;
     let mut finished_map = [false; 256];
 

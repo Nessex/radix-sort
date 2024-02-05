@@ -19,7 +19,7 @@ impl RadixKey for u16 {
         if cfg!(target_endian = "little") {
             unsafe {
                 (self as *const Self as *const u8)
-                    .wrapping_offset(level as isize)
+                    .wrapping_add(level)
                     .read()
             }
         } else {
@@ -38,7 +38,7 @@ impl RadixKey for u32 {
         if cfg!(target_endian = "little") {
             unsafe {
                 (self as *const Self as *const u8)
-                    .wrapping_offset(level as isize)
+                    .wrapping_add(level)
                     .read()
             }
         } else {
@@ -57,7 +57,7 @@ impl RadixKey for u64 {
         if cfg!(target_endian = "little") {
             unsafe {
                 (self as *const Self as *const u8)
-                    .wrapping_offset(level as isize)
+                    .wrapping_add(level)
                     .read()
             }
         } else {
@@ -76,7 +76,7 @@ impl RadixKey for u128 {
         if cfg!(target_endian = "little") {
             unsafe {
                 (self as *const Self as *const u8)
-                    .wrapping_offset(level as isize)
+                    .wrapping_add(level)
                     .read()
             }
         } else {
@@ -96,7 +96,7 @@ impl RadixKey for usize {
         if cfg!(target_endian = "little") {
             unsafe {
                 (self as *const Self as *const u8)
-                    .wrapping_offset(level as isize)
+                    .wrapping_add(level)
                     .read()
             }
         } else {
@@ -116,7 +116,7 @@ impl RadixKey for usize {
         if cfg!(target_endian = "little") {
             unsafe {
                 (self as *const Self as *const u8)
-                    .wrapping_offset(level as isize)
+                    .wrapping_add(level)
                     .read()
             }
         } else {
@@ -136,7 +136,7 @@ impl RadixKey for usize {
         if cfg!(target_endian = "little") {
             unsafe {
                 (self as *const Self as *const u8)
-                    .wrapping_offset(level as isize)
+                    .wrapping_add(level)
                     .read()
             }
         } else {
