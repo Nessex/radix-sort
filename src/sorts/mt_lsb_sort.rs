@@ -151,7 +151,7 @@ impl<'a> Sorter<'a> {
             return;
         }
 
-        self.cm.with_tmp_buffer(bucket.len(), |_, tmp_bucket| {
+        self.cm.with_tmp_buffer(bucket, |_, bucket, tmp_bucket| {
             let levels: Vec<usize> = (start_level..=end_level).collect();
             let mut invert = false;
 
@@ -200,7 +200,7 @@ impl<'a> Sorter<'a> {
             return;
         }
 
-        self.cm.with_tmp_buffer(bucket.len(), |_, tmp_bucket| {
+        self.cm.with_tmp_buffer(bucket, |_, bucket, tmp_bucket| {
             mt_lsb_sort(bucket, tmp_bucket, &tile_counts, tile_size, level);
 
             bucket

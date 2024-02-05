@@ -54,12 +54,12 @@ impl<'a> Sorter<'a> {
             return;
         }
 
-        self.cm.with_tmp_buffer(bucket.len(), |cm, tmp_bucket| {
+        self.cm.with_tmp_buffer(bucket, |cm, bucket, tmp_bucket| {
             let mut invert = false;
             let mut use_next_counts = false;
             let mut counts = cm.get_empty_counts();
             let mut meta = CountMeta::default();
-            let mut next_counts: Rc<RefCell<Counts>> = cm.get_empty_counts();
+            let mut next_counts = cm.get_empty_counts();
 
             for level in start_level..=end_level {
                 if level == end_level {

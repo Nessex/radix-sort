@@ -41,9 +41,7 @@ pub fn recombinating_sort<T>(
 ) where
     T: RadixKey + Sized + Send + Copy + Sync,
 {
-    let bucket_len = bucket.len();
-
-    cm.with_tmp_buffer(bucket_len, |cm, tmp_bucket| {
+    cm.with_tmp_buffer(bucket, |cm, bucket, tmp_bucket| {
         bucket
             .par_chunks(tile_size)
             .zip(tmp_bucket.par_chunks_mut(tile_size))

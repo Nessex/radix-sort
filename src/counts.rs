@@ -148,18 +148,31 @@ impl CountManager {
     }
 
     #[inline(always)]
-    pub fn with_tmp_buffer<T: Copy, F: FnMut(&CountManager, &mut [T])>(
-        &self,
-        len: usize,
-        mut f: F,
-    ) {
+    pub fn with_tmp_buffer<T, F>(&self, src_bucket: &mut [T], mut f: F)
+    where
+        T: Copy,
+        F: FnMut(&CountManager, &mut [T], &mut [T]),
+    {
+        let len = src_bucket.len();
         Self::THREAD_CTX.with(|ct| {
             let mut tmp = bumpalo::collections::Vec::with_capacity_in(len, &ct.bump);
-            // Safety: It's up to the caller to ensure that all values in the tmp buffer are overwritten before use
+
+            // Safety: Vec has the same capacity as the input size, and set_len is not called to set
+            // the full vec len until after all data has been initialized. Source data is Copy
+            // so a full copy of the source data is sufficient for initialization.
+
+            // Note: This is done rather than something like extend because the performance
+            // is significantly better. Extend and co. use push and therefore increment len for each item
+            // where this simply copies all the data first then sets len once.
+
+            // Existing data is used rather than just leaving it uninitialized until write because
+            // doing so is undefined behavior and MaybeUninit creates a bunch of code duplication and bloat.
+            // There's only a minor performance hit for using the copy instead of overwriting uninitialized data.
             unsafe {
+                std::ptr::copy_nonoverlapping(src_bucket.as_ptr(), tmp.as_mut_ptr(), len);
                 tmp.set_len(len);
             }
-            f(self, &mut tmp);
+            f(self, src_bucket, &mut tmp);
             drop(tmp);
         })
     }
