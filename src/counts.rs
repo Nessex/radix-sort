@@ -73,22 +73,22 @@ impl CountManager {
         static THREAD_CTX: ThreadContext = Default::default();
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn get_empty_counts(&self) -> Rc<RefCell<Counts>> {
-        if let Some(counts) = Self::THREAD_CTX.with(|ct| ct.counts.borrow_mut().pop()) {
-            counts
-        } else {
-            Default::default()
-        }
+        Self::THREAD_CTX
+            .with(|ct| ct
+                .counts
+                .borrow_mut()
+                .pop()
+                .unwrap_or(Default::default()))
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn return_counts(&self, counts: Rc<RefCell<Counts>>) {
         counts.borrow_mut().clear();
         Self::THREAD_CTX.with(|ct| ct.counts.borrow_mut().push(counts));
     }
 
-    #[inline(always)]
     pub fn count_into<T: RadixKey>(
         &self,
         counts: &mut Counts,
@@ -182,7 +182,7 @@ impl CountManager {
 impl Counter {
     #[inline(always)]
     fn clear(&mut self) {
-        self.0.iter_mut().for_each(|x| *x = 0);
+        self.0.fill(0)
     }
 
     #[inline(always)]
@@ -197,38 +197,34 @@ impl Counter {
         println!("({}) COUNT", level);
 
         self.clear();
-        counts.clear();
+        meta.already_sorted = true;
 
         if bucket.is_empty() {
-            meta.first = 0;
-            meta.last = 0;
-            meta.already_sorted = true;
             return;
         } else if bucket.len() == 1 {
             let b = bucket[0].get_level(level) as usize;
-            counts[b] += 1;
+            counts[b] = 1;
 
             meta.first = b as u8;
             meta.last = b as u8;
-            meta.already_sorted = true;
             return;
         }
 
-        let mut already_sorted = true;
-        let first = bucket.first().unwrap().get_level(level);
-        let last = bucket.last().unwrap().get_level(level);
+        meta.first = unsafe { bucket.get_unchecked(0).get_level(level) };
+        meta.last = unsafe { bucket.get_unchecked(bucket.len() - 1).get_level(level) };
 
-        let mut continue_from = bucket.len();
+        let mut continue_from = 0;
         let mut prev = 0usize;
 
         // First, count directly into the output buffer until we find a value that is out of order.
-        for (i, item) in bucket.iter().enumerate() {
+        for item in bucket {
             let b = item.get_level(level) as usize;
-            counts[b] += 1;
+            unsafe { *self.0.get_unchecked_mut(b*4) += 1 }
+
+            continue_from += 1;
 
             if b < prev {
-                continue_from = i + 1;
-                already_sorted = false;
+                meta.already_sorted = false;
                 break;
             }
 
@@ -236,52 +232,48 @@ impl Counter {
         }
 
         if continue_from == bucket.len() {
-            meta.first = first;
-            meta.last = last;
-            meta.already_sorted = already_sorted;
             return;
         }
 
         let chunks = bucket[continue_from..].chunks_exact(4);
         let rem = chunks.remainder();
 
-        chunks.into_iter().for_each(|chunk| {
-            let a = chunk[0].get_level(level) as usize;
-            let b = chunk[1].get_level(level) as usize;
-            let c = chunk[2].get_level(level) as usize;
-            let d = chunk[3].get_level(level) as usize;
+        chunks.for_each(|chunk| unsafe {
+            let a = chunk.get_unchecked(0).get_level(level) as usize * 4;
+            let b = chunk.get_unchecked(1).get_level(level) as usize * 4 + 1;
+            let c = chunk.get_unchecked(2).get_level(level) as usize * 4 + 2;
+            let d = chunk.get_unchecked(3).get_level(level) as usize * 4 + 4;
 
-            self.0[a * 4] += 1;
-            self.0[1 + b * 4] += 1;
-            self.0[2 + c * 4] += 1;
-            self.0[3 + d * 4] += 1;
+            debug_assert!(a < 1024);
+            debug_assert!(b < 1024);
+            debug_assert!(c < 1024);
+            debug_assert!(d < 1024);
+
+            *self.0.get_unchecked_mut(a) += 1;
+            *self.0.get_unchecked_mut(b) += 1;
+            *self.0.get_unchecked_mut(c) += 1;
+            *self.0.get_unchecked_mut(d) += 1;
         });
 
-        rem.iter().for_each(|v| {
-            let b = v.get_level(level) as usize;
-            counts[b] += 1;
+        rem.into_iter().for_each(|v| unsafe {
+            let b = v.get_level(level) as usize * 4;
+            *self.0.get_unchecked_mut(b) += 1;
         });
 
         for i in 0..256 {
-            let agg = self.0[i * 4] + self.0[1 + i * 4] + self.0[2 + i * 4] + self.0[3 + i * 4];
-            counts[i] += agg;
-        }
+            let a = i * 4;
 
-        meta.first = first;
-        meta.last = last;
-        meta.already_sorted = already_sorted;
+            unsafe {
+                *counts.0.get_unchecked_mut(i) = *self.0.get_unchecked(a) + *self.0.get_unchecked(a + 1) + *self.0.get_unchecked(a + 2) + *self.0.get_unchecked(a + 3);
+            }
+        }
     }
 }
 
 impl Counts {
     #[inline(always)]
     pub fn clear(&mut self) {
-        self.0.iter_mut().for_each(|x| *x = 0);
-    }
-
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self::default()
+        self.0.fill(0);
     }
 
     #[inline]

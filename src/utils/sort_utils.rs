@@ -24,7 +24,7 @@ where
     println!("({}) TILE_COUNT", level);
 
     let num_tiles = cdiv(bucket.len(), tile_size);
-    let mut tiles: Vec<Counts> = vec![Counts::new(); num_tiles];
+    let mut tiles: Vec<Counts> = vec![Counts::default(); num_tiles];
     let mut meta: Vec<CountMeta> = vec![CountMeta::default(); num_tiles];
 
     #[cfg(feature = "multi-threaded")]

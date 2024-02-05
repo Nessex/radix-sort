@@ -41,12 +41,16 @@ fn main() {
     // sorting algorithm, depending on the profiler. This makes it more obvious.
     sleep(Duration::from_millis(300));
 
-    inputs.radix_sort_builder().with_tuner(&MyTuner {}).sort();
+    inputs.radix_sort_builder()
+        .with_tuner(&MyTuner {})
+        .sort();
 
     // A second run, for comparison
     sleep(Duration::from_millis(300));
     let time = Instant::now();
-    inputs_2.radix_sort_builder().with_tuner(&MyTuner {}).sort();
+    inputs_2.radix_sort_builder()
+        .with_tuner(&MyTuner {})
+        .sort();
 
     let e = time.elapsed().as_millis();
     println!("Elapsed: {}ms", e);

@@ -26,7 +26,7 @@ partition = "0.1.2"
 [dev-dependencies]
 rayon = "1.8"
 block-pseudorand = "0.1.2"
-dhat = "0.3.2"
+dhat = "0.3.3"
 
 # Workaround for reducing compile time when not tuning or benchmarking
 # Suggestions for a better alternative very welcome...

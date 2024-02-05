@@ -151,15 +151,15 @@ impl<'a> Sorter<'a> {
             return;
         }
 
-        self.cm.with_tmp_buffer(bucket, |_, bucket, tmp_bucket| {
+        self.cm.with_tmp_buffer(bucket, |cm, bucket, tmp_bucket| {
             let levels: Vec<usize> = (start_level..=end_level).collect();
             let mut invert = false;
 
             for level in levels {
                 let (tile_counts, already_sorted) = if invert {
-                    get_tile_counts(&self.cm, tmp_bucket, tile_size, level)
+                    get_tile_counts(cm, tmp_bucket, tile_size, level)
                 } else {
-                    get_tile_counts(&self.cm, bucket, tile_size, level)
+                    get_tile_counts(cm, bucket, tile_size, level)
                 };
 
                 if already_sorted {
